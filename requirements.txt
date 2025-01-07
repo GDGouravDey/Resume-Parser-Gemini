@@ -1,11 +1,12 @@
 Flask
 pypdf
 python-dotenv
+google-cloud-aiplatform
+google-generativeai
 pandas
 matplotlib
 nltk
 PyPDF2
-python-dotenv
 waitress
 flask_cors
-google.generativeai
+langchain

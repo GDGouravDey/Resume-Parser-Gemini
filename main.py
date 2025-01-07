@@ -5,6 +5,10 @@ from flask import Flask, request, render_template
 from pypdf import PdfReader
 import google.generativeai as genai
 from dotenv import load_dotenv
+from google.cloud import aiplatform
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+import numpy as np
 
 # Load environment variables from .env file
 load_dotenv()
@@ -16,12 +20,20 @@ app = Flask(__name__)
 # Configure the path for custom modules
 sys.path.insert(0, os.path.abspath(os.getcwd()))
 
-# Load the GEMINI API key
+# Configuring credentials
 api_key = os.environ.get('GEMINI_API_KEY')
-
-# Check if API key is loaded
 if not api_key:
     raise ValueError("API key is missing. Please set 'GEMINI_API_KEY' in your .env file.")
+google_credentials = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+if google_credentials:
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = google_credentials
+
+# Initialize the Vertex AI platform
+try:
+    aiplatform.init(project='central-segment-447015-f3', location='us-central1')  # Your Google Cloud project details
+    print("Google Cloud AI Platform initialized successfully!")
+except Exception as e:
+    raise RuntimeError(f"Failed to initialize Google Cloud AI platform: {e}")
 
 # Configure Gemini API
 try:
@@ -30,9 +42,14 @@ try:
 except Exception as e:
     raise RuntimeError(f"Failed to configure Gemini API: {e}")
 
-def ats_extractor(resume_data):
+# Load the knowledge base CSV containing courses and certifications
+knowledge_base_df = pd.read_csv('knowledge_base.csv', on_bad_lines='skip')
+
+
+# Function to extract information from the resume using Gemini
+def ats_extractor_with_rag(resume_data):
     """
-    Extracts information from a resume using Gemini
+    Extracts resume details and recommends relevant courses/certifications using RAG.
 
     Args:
         resume_data: String containing the resume content
@@ -40,51 +57,73 @@ def ats_extractor(resume_data):
     Returns:
         dict: Extracted information in JSON format
     """
-    
-    prompt = """
-    You are an AI trained to extract information from resumes. Given a resume, identify and return the following details in JSON format:
 
-    1. Full Name
-    2. Email Address and Phone Number (an extra 'pe' is coming at the start in some cases. Ignore irrelevant 'pe' at start of email address.)
-    3. GitHub Profile URL
-    4. LinkedIn Profile URL
-    5. Education Details (Degree, Institution, Dates, Percentage / CGPA [Only include those details which are given in the resume])
-    6. Employment History (Company, Position, Dates)
-    7. Project Details in Short (Ignore the word 'Demo', it is used to indicate Demo Link)
-    8. Certifications
-    9. Achievements and Awards
-    10. Technical Skills
-    11. Soft Skills
-    12. Other Relevant Details
-    
-    Extract the skills and relevant keywords to recommend the best job roles for the candidate. Give only the top 3 most matching job roles.
-    
-    Recommend any certifications or courses that the candidate can take to improve their skills. Give maximum of 5 recommendations.
-    
-    Note:- Just give a JSON file, no need to give any explanation. Remove extra 'pe' from email address. Do not need to number anything.
+    # Extract relevant keywords from resume (e.g., skills, job roles)
+    extracted_keywords = extract_keywords(resume_data)
+
+    # Retrieve the relevant courses and certifications based on extracted keywords
+    relevant_courses = get_relevant_courses(extracted_keywords)
+
+    # Create the combined prompt with resume data and course information
+    combined_prompt = f"""
+    Given the following resume data and relevant course/certification recommendations:
+
+    Resume Data:
+    {resume_data}
+
+    Relevant Recommendations (Courses, Certifications, etc.):
+    {relevant_courses}
+
+    Based on the above, generate recommendations for career improvement and certifications.
     """
+    
+    # Generate the response from the Gemini API
+    response = model.generate_content(combined_prompt)
+    return response.text.strip()
 
-    try:
-        response = model.generate_content(prompt + resume_data)
-        response_text = response.text.strip()
-        
-        # Handle the response format
-        if response_text.startswith("```json"):
-            response_text = response_text[7:].strip()  
-        if response_text.endswith("```"):
-            response_text = response_text[:-3].strip()
-        
-        # Print and return the cleaned response
-        print(response_text)
-        return remove_empty_brackets(response_text)
-    except Exception as e:
-        print(f"Error during API request: {e}")
-        return None
+# Function to extract keywords (skills, job roles, etc.) from resume
+def extract_keywords(resume_data):
+    # For simplicity, we are using a basic split. You can integrate Gemini to extract specific skills and job roles.
+    keywords = resume_data.split()  # This is a placeholder; use a more sophisticated approach for actual use.
+    return keywords
 
-def remove_empty_brackets(input_string):
-    lines = input_string.splitlines()
-    filtered_lines = [line for line in lines if '[]' not in line]
-    return '\n'.join(filtered_lines)
+# Function to retrieve relevant courses based on extracted keywords
+def get_relevant_courses(extracted_keywords):
+    vectorizer = TfidfVectorizer(stop_words='english')
+
+    # Combine all the relevant course information from the knowledge base into a single text
+    course_descriptions = knowledge_base_df['Title'] + " " + knowledge_base_df['Skills']
+    
+    # Fit the vectorizer on the course descriptions
+    vectorizer.fit(course_descriptions)
+    
+    # Transform the extracted keywords into the same vector space
+    resume_keywords = [" ".join(extracted_keywords)]  # Join keywords as a single string
+    resume_vec = vectorizer.transform(resume_keywords)
+    
+    # Calculate cosine similarity between resume and course descriptions
+    course_vecs = vectorizer.transform(course_descriptions)
+    cosine_similarities = np.dot(resume_vec, course_vecs.T).toarray().flatten()
+
+    # Sort courses by similarity and get the top 5
+    top_course_indices = cosine_similarities.argsort()[-5:][::-1]
+    
+    # Retrieve the top matching courses
+    relevant_courses = knowledge_base_df.iloc[top_course_indices][['Title', 'Provider', 'Type', 'Duration']]
+    
+    return relevant_courses.to_dict(orient='records')
+
+
+# Function to read the PDF and extract text
+def _read_file_from_path(path):
+    reader = PdfReader(path) 
+    data = ""
+
+    for page_no in range(len(reader.pages)):
+        page = reader.pages[page_no] 
+        data += page.extract_text()
+
+    return data 
 
 @app.route('/')
 def index():
@@ -105,28 +144,18 @@ def ats():
     doc_path = os.path.join(UPLOAD_PATH, "file.pdf")
     
     # Read the file and extract information
-    data = _read_file_from_path(doc_path)
-    json_data = ats_extractor(data)
+    resume_data = _read_file_from_path(doc_path)
     
-    try:
-        json_object = json.loads(json_data)
-    except ValueError as e:
-        print("Invalid JSON response:", e)
-        json_object = {}
-
-    print("Processed Data:", json_object)
+    # # Extract resume details and get course recommendations
+    response = ats_extractor_with_rag(resume_data)
     
-    return render_template('index.html', data=json.dumps(json_object))
+    print("Processed Resume Data:")
+    print(resume_data)  # Print the extracted resume data
 
-def _read_file_from_path(path):
-    reader = PdfReader(path) 
-    data = ""
-
-    for page_no in range(len(reader.pages)):
-        page = reader.pages[page_no] 
-        data += page.extract_text()
-
-    return data 
+    print("Generated Course and Certification Recommendations:")
+    print(response)  # Print the generated recommendations
+    
+    return render_template('index.html', data=json.dumps({"Resume Data": resume_data, "AI-based Recommendations": response}))
 
 if __name__ == "__main__":
     app.run(port=8000, debug=True)

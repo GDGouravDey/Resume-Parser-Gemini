@@ -65,32 +65,37 @@
                     {% if data %}
                     <script>
                         function displayDictionaryValues(data) {
-                            var dictionaryValuesDiv = document.getElementById("dictionaryValues");
-                            var html = generateHTML(data);
+                            const dictionaryValuesDiv = document.getElementById("dictionaryValues");
+                            const html = generateHTML(data);
                             dictionaryValuesDiv.innerHTML = html;
                         }
-
+                    
                         function generateHTML(data) {
-                            var html = "<ul>";
-                            for (var key in data) {
+                            let html = '<div class="space-y-4">';
+                            for (const key in data) {
                                 if (data.hasOwnProperty(key)) {
-                                    html += "<li><strong>" + key + ":</strong> ";
-                                    if (typeof data[key] === 'object') {
-                                        html += generateHTML(data[key]);
+                                    const value = data[key];
+                                    html += `<div class="p-4 bg-gray-800 rounded-lg shadow-md">`;
+                                    html += `<h3 class="text-lg font-semibold text-blue-400">${key}</h3>`;
+                                    if (typeof value === "object") {
+                                        html += generateHTML(value);
                                     } else {
-                                        html += data[key];
+                                        const content = String(value).replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+                                        html += `<p class="text-gray-300">${content}</p>`;
                                     }
-                                    html += "</li>";
+                                    html += `</div>`;
                                 }
                             }
-                            html += "</ul>";
+                            html += '</div>';
                             return html;
                         }
-                        data = {{ data | tojson | safe}};
+                    
+                        data = {{ data | tojson | safe }};
                         console.log(data);
-                        
                         displayDictionaryValues(JSON.parse(data));
                     </script>
+                    
+                    
                     {% endif %}
                 </div>
             </div>
