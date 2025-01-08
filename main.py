@@ -48,16 +48,6 @@ knowledge_base_df = pd.read_csv('knowledge_base.csv', on_bad_lines='skip')
 
 # Function to extract information from the resume using Gemini
 def ats_extractor_with_rag(resume_data):
-    """
-    Extracts resume details and recommends relevant courses/certifications using RAG.
-
-    Args:
-        resume_data: String containing the resume content
-
-    Returns:
-        dict: Extracted information in JSON format
-    """
-
     # Extract relevant keywords from resume (e.g., skills, job roles)
     extracted_keywords = extract_keywords(resume_data)
 
