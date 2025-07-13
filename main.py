@@ -73,8 +73,7 @@ def ats_extractor_with_rag(resume_data):
 
 # Function to extract keywords (skills, job roles, etc.) from resume
 def extract_keywords(resume_data):
-    # For simplicity, we are using a basic split. You can integrate Gemini to extract specific skills and job roles.
-    keywords = resume_data.split()  # This is a placeholder; use a more sophisticated approach for actual use.
+    keywords = resume_data.split()
     return keywords
 
 # Function to retrieve relevant courses based on extracted keywords
@@ -88,7 +87,7 @@ def get_relevant_courses(extracted_keywords):
     vectorizer.fit(course_descriptions)
     
     # Transform the extracted keywords into the same vector space
-    resume_keywords = [" ".join(extracted_keywords)]  # Join keywords as a single string
+    resume_keywords = [" ".join(extracted_keywords)]
     resume_vec = vectorizer.transform(resume_keywords)
     
     # Calculate cosine similarity between resume and course descriptions
@@ -136,14 +135,14 @@ def ats():
     # Read the file and extract information
     resume_data = _read_file_from_path(doc_path)
     
-    # # Extract resume details and get course recommendations
+    # Extract resume details and get course recommendations
     response = ats_extractor_with_rag(resume_data)
     
     print("Processed Resume Data:")
-    print(resume_data)  # Print the extracted resume data
+    print(resume_data) 
 
     print("Generated Course and Certification Recommendations:")
-    print(response)  # Print the generated recommendations
+    print(response)
     
     return render_template('index.html', data=json.dumps({"Resume Data": resume_data, "AI-based Recommendations": response}))
 
